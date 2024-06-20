@@ -38,6 +38,7 @@ app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
 
+// create new admin
 app.post("/admin/register", async (req, res) => {
   const fullname = req.body.fullname;
   const username = req.body.username;
@@ -78,6 +79,7 @@ app.post("/admin/register", async (req, res) => {
   });
 });
 
+// mendapatkan data admin
 app.get("/admin", (req, res) => {
   const sqlSelect = "SELECT * FROM admin ORDER BY admin_id DESC";
 
@@ -90,6 +92,7 @@ app.get("/admin", (req, res) => {
   });
 });
 
+// single delete admin account
 app.delete("/admin/:id", (req, res) => {
   const id = req.params.id;
   const sqlDelete = "DELETE FROM admin WHERE admin_id = ?";
@@ -103,6 +106,7 @@ app.delete("/admin/:id", (req, res) => {
   });
 });
 
+// delete multiple admin
 app.delete("/multiple/admin", (req, res) => {
   const ids = req.body.ids;
   const sqlDelete = "DELETE FROM admin WHERE admin_id IN (?)";
@@ -120,6 +124,7 @@ app.delete("/multiple/admin", (req, res) => {
   });
 });
 
+// Update data admin
 app.put("/admin", async (req, res) => {
   const adminId = req.body.adminId;
   const newFullname = req.body.newFullname;
@@ -174,8 +179,222 @@ app.put("/admin", async (req, res) => {
   }
 });
 
-// ==================== Operator API
+// Admin WD Login
+app.post("/adminwd/login", (req, res) => {
+  const { username, password } = req.body;
+  const sql = "SELECT * FROM admin WHERE username = ?";
 
+  db.query(sql, username, async (err, result) => {
+    if (err) {
+      res.send({ error: err });
+      return;
+    }
+
+    if (result.length < 1) {
+      res.send({ error: "Salah username atau password" });
+      return;
+    }
+
+    const hashedPassword = result[0].password;
+
+    try {
+      const isMatch = await bcrypt.compare(password, hashedPassword);
+      if (!isMatch) {
+        res.send({ error: "Salah username atau password" });
+        return;
+      }
+
+      const token = jwt.sign({ success: result[0].user_id }, "secret_key", {
+        expiresIn: "1h",
+      });
+
+      res.send({ success: "Login Berhasil!", token, username });
+    } catch (error) {
+      res.send({ error: "Internal Server Error, try again later" });
+    }
+  });
+});
+
+// Getting Admin Data
+app.get("/adminwd/dataadmin/:username", (req, res) => {
+  const username = req.params.username;
+  const sql = "SELECT fullname, admin_id FROM admin WHERE username = ?";
+
+  db.query(sql, [username], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success", result });
+    }
+  });
+});
+
+// Getting Data WD
+app.get("/adminwd/datawd", (req, res) => {
+  const sql =
+    "SELECT dw.*, op.fullname AS operator_name, ag.name AS agent_name, adm.fullname AS admin_name FROM data_wd dw JOIN operator op ON dw.operator_id = op.user_id JOIN agent ag ON dw.agent_id = ag.agent_id LEFT JOIN admin adm ON dw.admin_id = adm.admin_id WHERE dw.status != 'closed' AND dw.status != 'pulled'";
+
+  db.query(sql, (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success", result });
+    }
+  });
+});
+
+// Get Data Grab by Admin id
+app.get("/adminwd/grab/:username", (req, res) => {
+  const username = req.params.username;
+  const sql =
+    "SELECT dw.*, op.fullname AS operator_name, ag.name AS agent_name, adm.username AS admin_username, adm.fullname AS admin_fullname FROM data_wd dw JOIN operator op ON dw.operator_id = op.user_id JOIN agent ag ON dw.agent_id = ag.agent_id JOIN admin adm ON dw.admin_id = adm.admin_id WHERE dw.status = 'grab' AND adm.username = ?";
+
+  db.query(sql, [username], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success", result });
+    }
+  });
+});
+
+// Cancel Data Grab by
+app.put("/adminwd/cancelwd/:id", (req, res) => {
+  const id = req.params.id;
+  const sql = "UPDATE data_wd SET status = 'pending' WHERE data_wd_id = ?";
+
+  db.query(sql, [id], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+// Confirm Data grab
+app.put("/adminwd/confirmwd/:id", (req, res) => {
+  const id = req.params.id;
+  const sql = "UPDATE data_wd SET status = 'success' WHERE data_wd_id = ?";
+
+  db.query(sql, [id], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+// Reject Data grab
+app.put("/adminwd/rejectwd/:id", (req, res) => {
+  const id = req.params.id;
+  const sql = "UPDATE data_wd SET status = 'reject' WHERE data_wd_id = ?";
+
+  db.query(sql, [id], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+// Multiple (Cancel, Reject, Confirm) Action Data Grab
+app.put("/adminwd/multipleaction", (req, res) => {
+  const { selectedItems, action } = req.body;
+  const sql = "UPDATE data_wd SET status = ? WHERE data_wd_id IN (?)";
+
+  db.query(sql, [action, selectedItems], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+// Admin WD Grabbing
+app.put("/adminwd/grabbing", (req, res) => {
+  const { amount, bankName, adminId } = req.body;
+  const sql =
+    "UPDATE data_wd SET status = 'grab', admin_id = ? WHERE bank_name = ? AND status = 'pending' ORDER BY data_wd_id LIMIT ?";
+  const sqlAllBank =
+    "UPDATE data_wd SET status = 'grab', admin_id = ? WHERE status = 'pending' ORDER BY data_wd_id LIMIT ?";
+  const sqlNoLimit =
+    "UPDATE data_wd SET status = 'grab', admin_id = ? WHERE bank_name = ? AND status = 'pending' ORDER BY data_wd_id";
+  const sqlNoLimitAllBank =
+    "UPDATE data_wd SET status = 'grab', admin_id = ? WHERE status = 'pending' ORDER BY data_wd_id";
+
+  if (bankName === "all" && amount === 1000) {
+    db.query(sqlNoLimitAllBank, [adminId], (err, result) => {
+      if (err) {
+        res.send({ error: err });
+      } else {
+        res.send({ success: "Success" });
+      }
+    });
+  } else if (bankName === "all" && amount < 1000) {
+    db.query(sqlAllBank, [adminId, amount], (err, result) => {
+      if (err) {
+        res.send({ error: err });
+      } else {
+        res.send({ success: "Success" });
+      }
+    });
+  } else if (bankName != "all" && amount === 1000) {
+    db.query(sqlNoLimit, [adminId, bankName], (err, result) => {
+      if (err) {
+        res.send({ error: err });
+      } else {
+        res.send({ success: "Success" });
+      }
+    });
+  } else {
+    db.query(sql, [adminId, bankName, amount], (err, result) => {
+      if (err) {
+        res.send({ error: err });
+      } else {
+        res.send({ success: "Success" });
+      }
+    });
+  }
+});
+
+// Admin WD cancel reject
+app.put("/adminwd/cancelreject/:id", (req, res) => {
+  const dataId = req.params.id;
+  const sql = "UPDATE data_wd SET status = 'pending' WHERE data_wd_id = ?";
+
+  db.query(sql, dataId, (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+app.put("/adminwd/cancelrejectmultiple", (req, res) => {
+  const selectedItems = req.body.selectedItems;
+  const sql = "UPDATE data_wd SET status = 'pending' WHERE data_wd_id IN (?)";
+
+  if (!selectedItems || selectedItems.length === 0) {
+    res.send({ error: "Tidak ada item yang dipilih!" });
+    return;
+  }
+
+  db.query(sql, [selectedItems], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+// ==================== Operator API
+// Get ada Operator
 app.get("/operator", (req, res) => {
   const sqlSelect =
     "SELECT o.*, ag.name AS agent_name, ag.agent_id FROM operator o JOIN agent ag ON o.agent_id = ag.agent_id ORDER BY user_id DESC";
@@ -189,6 +408,7 @@ app.get("/operator", (req, res) => {
   });
 });
 
+// Getting data agent with agent_id
 app.get("/agent", (req, res) => {
   const sqlSelect = "SELECT * FROM agent ORDER BY agent_id DESC";
 
@@ -201,6 +421,7 @@ app.get("/agent", (req, res) => {
   });
 });
 
+// Create Operator
 app.post("/operator/register", async (req, res) => {
   const fullname = req.body.fullname;
   const username = req.body.username;
@@ -247,6 +468,7 @@ app.post("/operator/register", async (req, res) => {
   });
 });
 
+// single delete operator
 app.delete("/operator/:id", (req, res) => {
   const id = req.params.id;
   const sqlDelete = "DELETE FROM operator WHERE user_id = ?";
@@ -260,6 +482,7 @@ app.delete("/operator/:id", (req, res) => {
   });
 });
 
+// Multiple delete Operator
 app.delete("/multiple/operator", (req, res) => {
   const ids = req.body.ids;
   const sqlDelete = "DELETE FROM operator WHERE user_id IN (?)";
@@ -277,6 +500,7 @@ app.delete("/multiple/operator", (req, res) => {
   });
 });
 
+// Update Operator Data
 app.put("/operator", async (req, res) => {
   const operatorId = req.body.operatorId;
   const newFullname = req.body.newFullname;
@@ -458,9 +682,10 @@ app.post("/operator/input", (req, res) => {
 // Getting Data wd when agent equal
 app.get("/operator/datawd/:agent", (req, res) => {
   const agentId = req.params.agent;
-  const sql = "SELECT * FROM data_wd WHERE agent_id = ? AND status != 'close'";
+  const sqlSelect =
+    "SELECT dw.*, adm.fullname AS admin_name FROM data_wd dw LEFT JOIN admin adm ON dw.admin_id = adm.admin_id WHERE dw.agent_id = ? AND dw.status != 'close'";
 
-  db.query(sql, agentId, (err, result) => {
+  db.query(sqlSelect, [agentId], (err, result) => {
     if (err) {
       res.send({ error: err });
     } else {
