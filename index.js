@@ -232,7 +232,7 @@ app.get("/adminwd/dataadmin/:username", (req, res) => {
 // Getting Data WD
 app.get("/adminwd/datawd", (req, res) => {
   const sql =
-    "SELECT dw.*, op.fullname AS operator_name, ag.name AS agent_name, adm.fullname AS admin_name FROM data_wd dw JOIN operator op ON dw.operator_id = op.user_id JOIN agent ag ON dw.agent_id = ag.agent_id LEFT JOIN admin adm ON dw.admin_id = adm.admin_id WHERE dw.status != 'closed' AND dw.status != 'pulled'";
+    "SELECT dw.*, op.fullname AS operator_name, ag.name AS agent_name, adm.fullname AS admin_name, adm.username AS admin_username FROM data_wd dw JOIN operator op ON dw.operator_id = op.user_id JOIN agent ag ON dw.agent_id = ag.agent_id LEFT JOIN admin adm ON dw.admin_id = adm.admin_id WHERE dw.closed = FALSE AND dw.status != 'pulled'";
 
   db.query(sql, (err, result) => {
     if (err) {
@@ -361,12 +361,175 @@ app.put("/adminwd/grabbing", (req, res) => {
   }
 });
 
-// Admin WD cancel reject
-app.put("/adminwd/cancelreject/:id", (req, res) => {
-  const dataId = req.params.id;
-  const sql = "UPDATE data_wd SET status = 'pending' WHERE data_wd_id = ?";
+// Admin WD Closing
+// app.put("/adminwd/closing", (req, res) => {
+//   const { adminId } = req.body;
 
-  db.query(sql, dataId, (err, result) => {
+//   connec
+
+//   db.beginTransaction
+
+//   const insertClosedSql = "INSERT INTO closed (admin_id) VALUES (?)";
+//   const updateDataWdSql =
+//     "UPDATE data_wd SET closed = TRUE, closed_id = ? WHERE closed = FALSE";
+//   db.query(insertClosedSql, [adminId], (err, result) => {
+//     if (err) {
+//       res.send({ error: err });
+//       return;
+//     }
+
+//     const newClosedId = result.insertId;
+
+//     db.query(updateDataWdSql, [newClosedId], (err, result) => {
+//       if (err) {
+//         res.send({ error: err });
+//       } else {
+//         res.send({ success: "Success Closing" });
+//       }
+//     });
+//   });
+// });
+
+// Admin WD Closing
+app.put("/adminwd/closing", (req, res) => {
+  const { adminId } = req.body;
+
+  // Get a connection from the pool
+  db.getConnection((err, connection) => {
+    if (err) {
+      res.send({ error: err });
+      return;
+    }
+
+    // Start the transaction
+    connection.beginTransaction((err) => {
+      if (err) {
+        connection.release();
+        res.send({ error: err });
+        return;
+      }
+
+      // SQL for inserting data into the closed table
+      const insertClosedSql = "INSERT INTO closed (admin_id) VALUES (?)";
+
+      // Run the query to insert data into the closed table
+      connection.query(insertClosedSql, [adminId], (err, result) => {
+        if (err) {
+          // Rollback if there is an error
+          return connection.rollback(() => {
+            connection.release();
+            res.send({ error: err });
+          });
+        }
+
+        // Get the new closed ID
+        const newClosedId = result.insertId;
+
+        // SQL for updating the data_wd table
+        const updateDataWdSql =
+          "UPDATE data_wd SET closed = TRUE, closed_id = ? WHERE closed = FALSE";
+
+        // Run the query to update the data_wd table
+        connection.query(updateDataWdSql, [newClosedId], (err, result) => {
+          if (err) {
+            // Rollback if there is an error
+            return connection.rollback(() => {
+              connection.release();
+              res.send({ error: err });
+            });
+          }
+
+          // Commit the transaction if there are no errors
+          connection.commit((err) => {
+            if (err) {
+              // Rollback if there is an error committing
+              return connection.rollback(() => {
+                connection.release();
+                res.send({ error: err });
+              });
+            }
+
+            // Release the connection back to the pool
+            connection.release();
+
+            // Send success response
+            res.send({ success: "Success Closing" });
+          });
+        });
+      });
+    });
+  });
+});
+
+// Admin WD Get History/Closed Data
+app.get("/adminwd/history", (req, res) => {
+  const sql =
+    "SELECT cls.*, adm.fullname AS admin_closed FROM closed cls JOIN admin adm ON cls.admin_id = adm.admin_id ORDER BY closed_id DESC";
+
+  db.query(sql, (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success getting data", result });
+    }
+  });
+});
+
+// Admin WD Undo Close Data by closed_id
+app.put("/adminwd/undoclosed", (req, res) => {
+  const { id } = req.body;
+  const sqlUpdateDataWd =
+    "UPDATE data_wd SET closed_id = null, closed = FALSE WHERE closed_id = ?";
+  const sqlDeleteClose = "DELETE FROM closed WHERE closed_id = ?";
+
+  db.query(sqlUpdateDataWd, [id], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      db.query(sqlDeleteClose, [id], (err, result) => {
+        if (err) {
+          res.send({ error: err });
+        } else {
+          res.send({ success: "Success" });
+        }
+      });
+    }
+  });
+});
+
+// Admin WD getting History by closed ID
+app.get("/adminwd/history/:id", (req, res) => {
+  const id = req.params.id;
+  const sql =
+    "SELECT dw.*, ag.name AS agent_name, op.fullname AS operator_name, adm.fullname AS admin_name, cls.closed_timestamp FROM data_wd dw JOIN agent ag ON dw.agent_id = ag.agent_id JOIN operator op ON dw.operator_id = op.user_id JOIN admin adm ON dw.admin_id = adm.admin_id JOIN closed cls ON dw.closed_id = cls.closed_id WHERE dw.closed_id = ?";
+
+  db.query(sql, [id], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success", result });
+    }
+  });
+});
+
+// Admin getting data list agent
+app.get("/adminwd/agent", (req, res) => {
+  const sql = "SELECT * FROM agent";
+  db.query(sql, (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success", result });
+    }
+  });
+});
+
+// Admin delete agent
+app.delete("/agent/:id", (req, res) => {
+  const id = req.params.id;
+  const sql = "DELETE FROM agent WHERE agent_id = ?";
+
+  db.query(sql, [id], (err, result) => {
     if (err) {
       res.send({ error: err });
     } else {
@@ -375,16 +538,30 @@ app.put("/adminwd/cancelreject/:id", (req, res) => {
   });
 });
 
-app.put("/adminwd/cancelrejectmultiple", (req, res) => {
-  const selectedItems = req.body.selectedItems;
-  const sql = "UPDATE data_wd SET status = 'pending' WHERE data_wd_id IN (?)";
+// Admin Multiple Delete Agent
+app.delete("/adminwd/agent", (req, res) => {
+  const ids = req.body.ids;
+  const sqlDelete = "DELETE FROM agent WHERE agent_id IN (?)";
 
-  if (!selectedItems || selectedItems.length === 0) {
-    res.send({ error: "Tidak ada item yang dipilih!" });
-    return;
+  if (!ids || ids.length === 0) {
+    return res.send({ error: "No data deleted!" });
   }
 
-  db.query(sql, [selectedItems], (err, result) => {
+  db.query(sqlDelete, [ids], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Delete Success!" });
+    }
+  });
+});
+
+// Admin Add Agent
+app.post("/adminwd/addagent", (req, res) => {
+  const { agentName, provider } = req.body;
+  const sql = "INSERT INTO agent (name, provider) VALUES (?,?)";
+
+  db.query(sql, [agentName, provider], (err, result) => {
     if (err) {
       res.send({ error: err });
     } else {
@@ -393,7 +570,21 @@ app.put("/adminwd/cancelrejectmultiple", (req, res) => {
   });
 });
 
-// ==================== Operator API
+// Admin WD Edit agent
+app.put("/adminwd/agent", (req, res) => {
+  const { editId, newAgentName, newProvider } = req.body;
+  const sql = "UPDATE agent SET name = ?, provider = ? WHERE agent_id = ?";
+
+  db.query(sql, [newAgentName, newProvider, editId], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+// ==================== Operator API =============================
 // Get ada Operator
 app.get("/operator", (req, res) => {
   const sqlSelect =
@@ -683,7 +874,7 @@ app.post("/operator/input", (req, res) => {
 app.get("/operator/datawd/:agent", (req, res) => {
   const agentId = req.params.agent;
   const sqlSelect =
-    "SELECT dw.*, adm.fullname AS admin_name FROM data_wd dw LEFT JOIN admin adm ON dw.admin_id = adm.admin_id WHERE dw.agent_id = ? AND dw.status != 'close'";
+    "SELECT dw.*, adm.fullname AS admin_name, op.fullname AS operator_name FROM data_wd dw LEFT JOIN admin adm ON dw.admin_id = adm.admin_id JOIN operator op ON dw.operator_id = op.user_id WHERE dw.agent_id = ? AND dw.closed = FALSE";
 
   db.query(sqlSelect, [agentId], (err, result) => {
     if (err) {
