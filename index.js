@@ -208,7 +208,7 @@ app.post("/adminwd/login", (req, res) => {
         expiresIn: "1h",
       });
 
-      res.send({ success: "Login Berhasil!", token, username });
+      res.send({ success: "Login Berhasil!", token, username, result });
     } catch (error) {
       res.send({ error: "Internal Server Error, try again later" });
     }
@@ -777,7 +777,7 @@ app.post("/operator/login", (req, res) => {
         expiresIn: "1h",
       });
 
-      res.send({ success: "Login Berhasil!", token, username });
+      res.send({ success: "Login Berhasil!", token, username, result });
     } catch (error) {
       res.send({ error: "Internal Server Error, try again later" });
     }
@@ -914,6 +914,22 @@ app.put("/operator/multiplepullrequest", (req, res) => {
       res.send({ error: err });
     } else {
       res.send({ success: "Success" });
+    }
+  });
+});
+
+// Operator getting data closed details by id closed and agent_id
+app.get("/op/history/:id/:ag", (req, res) => {
+  const id = req.params.id;
+  const ag = req.params.ag;
+  const sql =
+    "SELECT dw.*, ag.name AS agent_name, op.fullname AS operator_name, adm.fullname AS admin_name, cls.closed_timestamp FROM data_wd dw JOIN agent ag ON dw.agent_id = ag.agent_id JOIN operator op ON dw.operator_id = op.user_id JOIN admin adm ON dw.admin_id = adm.admin_id JOIN closed cls ON dw.closed_id = cls.closed_id WHERE dw.closed_id = ? AND dw.agent_id = ?";
+
+  db.query(sql, [id, ag], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success", result });
     }
   });
 });
