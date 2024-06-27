@@ -10,6 +10,8 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
 const util = require("util");
+const http = require("http");
+const { Server } = require("socket.io");
 
 const db = mysql.createPool({
   host: "localhost",
@@ -18,12 +20,36 @@ const db = mysql.createPool({
   database: "dbsystemwd",
 });
 
+const server = http.createServer(app);
+
 app.use(
   cors({
     origin: ["http://localhost:5173", "http://localhost:5174"],
     methods: ["GET", "POST", "DELETE", "PUT"],
     credentials: true,
   })
+);
+
+const io = new Server(server, {
+  cors: {
+    origin: ["http://localhost:5173", "http://localhost:5174"],
+    methods: ["GET", "POST", "DELETE", "PUT"],
+    credentials: true,
+  },
+});
+
+io.on("connection", (socket) => {
+  console.log(`Client connected : ${socket.id}`);
+});
+
+app.use(
+  "/uploads/profile",
+  express.static(path.join(__dirname, "uploads/profile"))
+);
+
+app.use(
+  "/uploads/evidence",
+  express.static(path.join(__dirname, "uploads/evidence"))
 );
 
 app.use(cookieParser());
@@ -34,8 +60,12 @@ app.get("/", (req, res) => {
   res.send("API!");
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
+// app.listen(port, () => {
+//   console.log(`Example app listening on port ${port}`);
+// });
+
+server.listen(port, () => {
+  console.log(`app listening on port ${port}`);
 });
 
 // create new admin
@@ -218,7 +248,8 @@ app.post("/adminwd/login", (req, res) => {
 // Getting Admin Data
 app.get("/adminwd/dataadmin/:username", (req, res) => {
   const username = req.params.username;
-  const sql = "SELECT fullname, admin_id FROM admin WHERE username = ?";
+  const sql =
+    "SELECT fullname, admin_id, username, role, profile FROM admin WHERE username = ?";
 
   db.query(sql, [username], (err, result) => {
     if (err) {
@@ -232,7 +263,7 @@ app.get("/adminwd/dataadmin/:username", (req, res) => {
 // Getting Data WD
 app.get("/adminwd/datawd", (req, res) => {
   const sql =
-    "SELECT dw.*, op.fullname AS operator_name, ag.name AS agent_name, adm.fullname AS admin_name, adm.username AS admin_username FROM data_wd dw JOIN operator op ON dw.operator_id = op.user_id JOIN agent ag ON dw.agent_id = ag.agent_id LEFT JOIN admin adm ON dw.admin_id = adm.admin_id WHERE dw.closed = FALSE AND dw.status != 'pulled'";
+    "SELECT dw.*, op.fullname AS operator_name, ag.name AS agent_name, adm.fullname AS admin_name, adm.username AS admin_username, adm.profile FROM data_wd dw JOIN operator op ON dw.operator_id = op.user_id JOIN agent ag ON dw.agent_id = ag.agent_id LEFT JOIN admin adm ON dw.admin_id = adm.admin_id WHERE dw.closed = FALSE AND dw.status != 'pulled'";
 
   db.query(sql, (err, result) => {
     if (err) {
@@ -326,39 +357,48 @@ app.put("/adminwd/grabbing", (req, res) => {
   const sqlNoLimitAllBank =
     "UPDATE data_wd SET status = 'grab', admin_id = ? WHERE status = 'pending' ORDER BY data_wd_id";
 
-  if (bankName === "all" && amount === 1000) {
-    db.query(sqlNoLimitAllBank, [adminId], (err, result) => {
-      if (err) {
-        res.send({ error: err });
+  const checkOnProcess =
+    "SELECT * FROM data_wd WHERE status = 'grab' AND admin_id = ?";
+
+  db.query(checkOnProcess, [adminId], (err, result) => {
+    if (result.length > 0) {
+      res.send({ pending: "Selesaikan dulu yang di grab!" });
+    } else {
+      if (bankName === "all" && amount === 1000) {
+        db.query(sqlNoLimitAllBank, [adminId], (err, result) => {
+          if (err) {
+            res.send({ error: err });
+          } else {
+            res.send({ success: "Success" });
+          }
+        });
+      } else if (bankName === "all" && amount < 1000) {
+        db.query(sqlAllBank, [adminId, amount], (err, result) => {
+          if (err) {
+            res.send({ error: err });
+          } else {
+            res.send({ success: "Success" });
+          }
+        });
+      } else if (bankName != "all" && amount === 1000) {
+        db.query(sqlNoLimit, [adminId, bankName], (err, result) => {
+          if (err) {
+            res.send({ error: err });
+          } else {
+            res.send({ success: "Success" });
+          }
+        });
       } else {
-        res.send({ success: "Success" });
+        db.query(sql, [adminId, bankName, amount], (err, result) => {
+          if (err) {
+            res.send({ error: err });
+          } else {
+            res.send({ success: "Success" });
+          }
+        });
       }
-    });
-  } else if (bankName === "all" && amount < 1000) {
-    db.query(sqlAllBank, [adminId, amount], (err, result) => {
-      if (err) {
-        res.send({ error: err });
-      } else {
-        res.send({ success: "Success" });
-      }
-    });
-  } else if (bankName != "all" && amount === 1000) {
-    db.query(sqlNoLimit, [adminId, bankName], (err, result) => {
-      if (err) {
-        res.send({ error: err });
-      } else {
-        res.send({ success: "Success" });
-      }
-    });
-  } else {
-    db.query(sql, [adminId, bankName, amount], (err, result) => {
-      if (err) {
-        res.send({ error: err });
-      } else {
-        res.send({ success: "Success" });
-      }
-    });
-  }
+    }
+  });
 });
 
 // Admin WD Closing
@@ -501,7 +541,7 @@ app.put("/adminwd/undoclosed", (req, res) => {
 app.get("/adminwd/history/:id", (req, res) => {
   const id = req.params.id;
   const sql =
-    "SELECT dw.*, ag.name AS agent_name, op.fullname AS operator_name, adm.fullname AS admin_name, cls.closed_timestamp FROM data_wd dw JOIN agent ag ON dw.agent_id = ag.agent_id JOIN operator op ON dw.operator_id = op.user_id JOIN admin adm ON dw.admin_id = adm.admin_id JOIN closed cls ON dw.closed_id = cls.closed_id WHERE dw.closed_id = ?";
+    "SELECT dw.*, ag.name AS agent_name, op.fullname AS operator_name, adm.fullname AS admin_name, adm.profile, cls.closed_timestamp FROM data_wd dw JOIN agent ag ON dw.agent_id = ag.agent_id JOIN operator op ON dw.operator_id = op.user_id JOIN admin adm ON dw.admin_id = adm.admin_id JOIN closed cls ON dw.closed_id = cls.closed_id WHERE dw.closed_id = ?";
 
   db.query(sql, [id], (err, result) => {
     if (err) {
@@ -576,6 +616,60 @@ app.put("/adminwd/agent", (req, res) => {
   const sql = "UPDATE agent SET name = ?, provider = ? WHERE agent_id = ?";
 
   db.query(sql, [newAgentName, newProvider, editId], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+// Change profile pic
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/profile");
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({ storage: storage });
+
+app.put("/adminwd/profilepic", upload.single("image"), (req, res) => {
+  const adminId = req.body.adminid;
+  const imagePath = req.file.path;
+
+  const sql = "UPDATE admin SET profile = ? WHERE admin_id = ?";
+
+  db.query(sql, [imagePath, adminId], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
+    }
+  });
+});
+
+// Upload Evidence
+const storageEvidence = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/evidence");
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+
+const uploadEvidence = multer({ storage: storageEvidence });
+
+app.put("/adminwd/evidence", uploadEvidence.single("image"), (req, res) => {
+  const wdid = req.body.wdid;
+  const imagePath = req.file.path;
+
+  const sql = "UPDATE data_wd SET evidence = ? WHERE data_wd_id = ?";
+
+  db.query(sql, [imagePath, wdid], (err, result) => {
     if (err) {
       res.send({ error: err });
     } else {
@@ -788,7 +882,7 @@ app.post("/operator/login", (req, res) => {
 app.get("/operator/agent/:username", (req, res) => {
   const username = req.params.username;
   const sql =
-    "SELECT op.user_id, op.fullname, op.username, op.role, ag.agent_id, ag.name, ag.provider FROM operator op JOIN agent ag ON op.agent_id = ag.agent_id WHERE op.username = ?";
+    "SELECT op.user_id, op.fullname, op.username, op.role, op.profile, ag.agent_id, ag.name, ag.provider FROM operator op JOIN agent ag ON op.agent_id = ag.agent_id WHERE op.username = ?";
 
   db.query(sql, username, (err, result) => {
     if (err) {
@@ -860,6 +954,10 @@ app.post("/operator/input", (req, res) => {
         if (err) {
           res.send({ error: err, message: "Response error from server!" });
         } else {
+          io.emit("data_inserted", {
+            success: "Data WD successfully inserted",
+            message: "Data WD successfully inserted",
+          });
           res.send({
             success: "Data WD successfully inserted",
             message: "Data berhasil di input",
@@ -874,7 +972,7 @@ app.post("/operator/input", (req, res) => {
 app.get("/operator/datawd/:agent", (req, res) => {
   const agentId = req.params.agent;
   const sqlSelect =
-    "SELECT dw.*, adm.fullname AS admin_name, op.fullname AS operator_name FROM data_wd dw LEFT JOIN admin adm ON dw.admin_id = adm.admin_id JOIN operator op ON dw.operator_id = op.user_id WHERE dw.agent_id = ? AND dw.closed = FALSE";
+    "SELECT dw.*, adm.fullname AS admin_name, adm.profile, op.fullname AS operator_name FROM data_wd dw LEFT JOIN admin adm ON dw.admin_id = adm.admin_id JOIN operator op ON dw.operator_id = op.user_id WHERE dw.agent_id = ? AND dw.closed = FALSE";
 
   db.query(sqlSelect, [agentId], (err, result) => {
     if (err) {
@@ -923,13 +1021,40 @@ app.get("/op/history/:id/:ag", (req, res) => {
   const id = req.params.id;
   const ag = req.params.ag;
   const sql =
-    "SELECT dw.*, ag.name AS agent_name, op.fullname AS operator_name, adm.fullname AS admin_name, cls.closed_timestamp FROM data_wd dw JOIN agent ag ON dw.agent_id = ag.agent_id JOIN operator op ON dw.operator_id = op.user_id JOIN admin adm ON dw.admin_id = adm.admin_id JOIN closed cls ON dw.closed_id = cls.closed_id WHERE dw.closed_id = ? AND dw.agent_id = ?";
+    "SELECT dw.*, ag.name AS agent_name, op.fullname AS operator_name, adm.fullname AS admin_name, adm.profile, cls.closed_timestamp FROM data_wd dw JOIN agent ag ON dw.agent_id = ag.agent_id JOIN operator op ON dw.operator_id = op.user_id JOIN admin adm ON dw.admin_id = adm.admin_id JOIN closed cls ON dw.closed_id = cls.closed_id WHERE dw.closed_id = ? AND dw.agent_id = ?";
 
   db.query(sql, [id, ag], (err, result) => {
     if (err) {
       res.send({ error: err });
     } else {
       res.send({ success: "Success", result });
+    }
+  });
+});
+
+// Change profile pic
+const storageOp = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/profile");
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+
+const uploads = multer({ storage: storageOp });
+
+app.put("/operator/profilepic", uploads.single("image"), (req, res) => {
+  const opId = req.body.opId;
+  const imagePath = req.file.path;
+
+  const sql = "UPDATE operator SET profile = ? WHERE user_id = ?";
+
+  db.query(sql, [imagePath, opId], (err, result) => {
+    if (err) {
+      res.send({ error: err });
+    } else {
+      res.send({ success: "Success" });
     }
   });
 });
