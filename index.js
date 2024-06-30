@@ -24,7 +24,7 @@ const server = http.createServer(app);
 
 app.use(
   cors({
-    origin: ["http://localhost:5173", "http://localhost:5174"],
+    origin: ["http://192.168.20.11:5173", "http://192.168.20.11:5174"],
     methods: ["GET", "POST", "DELETE", "PUT"],
     credentials: true,
   })
@@ -32,7 +32,7 @@ app.use(
 
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173", "http://localhost:5174"],
+    origin: ["http://192.168.20.11:5173", "http://192.168.20.11:5174"],
     methods: ["GET", "POST", "DELETE", "PUT"],
     credentials: true,
   },
@@ -64,7 +64,7 @@ app.get("/", (req, res) => {
 //   console.log(`Example app listening on port ${port}`);
 // });
 
-server.listen(port, () => {
+server.listen(port, "0.0.0.0", () => {
   console.log(`app listening on port ${port}`);
 });
 
@@ -360,44 +360,76 @@ app.put("/adminwd/grabbing", (req, res) => {
   const checkOnProcess =
     "SELECT * FROM data_wd WHERE status = 'grab' AND admin_id = ?";
 
-  db.query(checkOnProcess, [adminId], (err, result) => {
-    if (result.length > 0) {
-      res.send({ pending: "Selesaikan dulu yang di grab!" });
-    } else {
-      if (bankName === "all" && amount === 1000) {
-        db.query(sqlNoLimitAllBank, [adminId], (err, result) => {
-          if (err) {
-            res.send({ error: err });
-          } else {
-            res.send({ success: "Success" });
-          }
-        });
-      } else if (bankName === "all" && amount < 1000) {
-        db.query(sqlAllBank, [adminId, amount], (err, result) => {
-          if (err) {
-            res.send({ error: err });
-          } else {
-            res.send({ success: "Success" });
-          }
-        });
-      } else if (bankName != "all" && amount === 1000) {
-        db.query(sqlNoLimit, [adminId, bankName], (err, result) => {
-          if (err) {
-            res.send({ error: err });
-          } else {
-            res.send({ success: "Success" });
-          }
-        });
-      } else {
-        db.query(sql, [adminId, bankName, amount], (err, result) => {
-          if (err) {
-            res.send({ error: err });
-          } else {
-            res.send({ success: "Success" });
-          }
-        });
-      }
+  db.getConnection((err, connection) => {
+    if (err) {
+      res.send({ error: err });
+      return;
     }
+
+    connection.beginTransaction((err) => {
+      if (err) {
+        connection.release();
+        res.send({ error: err });
+        return;
+      }
+
+      connection.query(checkOnProcess, [adminId], (err, result) => {
+        if (err) {
+          connection.rollback(() => {
+            connection.release();
+            res.send({ error: err });
+          });
+          return;
+        }
+
+        if (result.length > 0) {
+          connection.rollback(() => {
+            connection.release();
+            res.send({ pending: "Selesaikan dulu yang di grab!" });
+          });
+          return;
+        }
+
+        let query;
+        let queryParams;
+
+        if (bankName === "all" && amount === 1000) {
+          query = sqlNoLimitAllBank;
+          queryParams = [adminId];
+        } else if (bankName === "all" && amount < 1000) {
+          query = sqlAllBank;
+          queryParams = [adminId, amount];
+        } else if (bankName !== "all" && amount === 1000) {
+          query = sqlNoLimit;
+          queryParams = [adminId, bankName];
+        } else {
+          query = sql;
+          queryParams = [adminId, bankName, amount];
+        }
+
+        connection.query(query, queryParams, (err, result) => {
+          if (err) {
+            connection.rollback(() => {
+              connection.release();
+              res.send({ error: err });
+            });
+            return;
+          }
+
+          connection.commit((err) => {
+            if (err) {
+              connection.rollback(() => {
+                connection.release();
+                res.send({ error: err });
+              });
+              return;
+            }
+            connection.release();
+            res.send({ success: "Success" });
+          });
+        });
+      });
+    });
   });
 });
 
