@@ -72,9 +72,10 @@ server.listen(port, "0.0.0.0", () => {
 app.post("/admin/register", async (req, res) => {
   const fullname = req.body.fullname;
   const username = req.body.username;
+  const role = req.body.role;
   const password = req.body.password;
   const sqlInsert =
-    "INSERT INTO admin (fullname, username, password) VALUES (?,?,?)";
+    "INSERT INTO admin (fullname, username, password, role) VALUES (?,?,?,?)";
   const cekUsername = "SELECT * FROM admin WHERE username = ?";
 
   const generateHash = async (password) => {
@@ -98,13 +99,17 @@ app.post("/admin/register", async (req, res) => {
     if (result.length > 0) {
       res.send({ error: "Username sudah ada!" });
     } else {
-      db.query(sqlInsert, [fullname, username, hashPass], (err, result) => {
-        if (err) {
-          res.send({ error: err });
-        } else {
-          res.send({ success: "Account berhasil di tambahkan!" });
+      db.query(
+        sqlInsert,
+        [fullname, username, hashPass, role],
+        (err, result) => {
+          if (err) {
+            res.send({ error: err });
+          } else {
+            res.send({ success: "Account berhasil di tambahkan!" });
+          }
         }
-      });
+      );
     }
   });
 });
@@ -159,11 +164,12 @@ app.put("/admin", async (req, res) => {
   const adminId = req.body.adminId;
   const newFullname = req.body.newFullname;
   const newUsername = req.body.newUsername;
+  const newRole = req.body.newRole;
   const newPass = req.body.newPass;
   const sqlUpdateWithPass =
-    "UPDATE admin SET fullname = ?, username = ?, password = ? WHERE admin_id = ?";
+    "UPDATE admin SET fullname = ?, username = ?, password = ?, role = ? WHERE admin_id = ?";
   const sqlUpdateNoPass =
-    "UPDATE admin SET fullname = ?, username = ? WHERE admin_id = ?";
+    "UPDATE admin SET fullname = ?, username = ?, role = ? WHERE admin_id = ?";
 
   const generateHash = async (password) => {
     const saltRounds = 10;
@@ -185,7 +191,7 @@ app.put("/admin", async (req, res) => {
   if (newPass === "") {
     db.query(
       sqlUpdateNoPass,
-      [newFullname, newUsername, adminId],
+      [newFullname, newUsername, newRole, adminId],
       (err, result) => {
         if (err) {
           res.send({ error: err });
@@ -197,7 +203,7 @@ app.put("/admin", async (req, res) => {
   } else {
     db.query(
       sqlUpdateWithPass,
-      [newFullname, newUsername, hashPass, adminId],
+      [newFullname, newUsername, hashPass, newRole, adminId],
       (err, result) => {
         if (err) {
           res.send({ error: err });
@@ -299,6 +305,10 @@ app.put("/adminwd/cancelwd/:id", (req, res) => {
       res.send({ error: err });
     } else {
       res.send({ success: "Success" });
+      io.emit("data_inserted", {
+        success: "Success",
+        message: "Success",
+      });
     }
   });
 });
@@ -313,6 +323,10 @@ app.put("/adminwd/confirmwd/:id", (req, res) => {
       res.send({ error: err });
     } else {
       res.send({ success: "Success" });
+      io.emit("data_inserted", {
+        success: "Success",
+        message: "Success",
+      });
     }
   });
 });
@@ -327,6 +341,10 @@ app.put("/adminwd/rejectwd/:id", (req, res) => {
       res.send({ error: err });
     } else {
       res.send({ success: "Success" });
+      io.emit("data_inserted", {
+        success: "Success",
+        message: "Success",
+      });
     }
   });
 });
@@ -341,6 +359,10 @@ app.put("/adminwd/multipleaction", (req, res) => {
       res.send({ error: err });
     } else {
       res.send({ success: "Success" });
+      io.emit("data_inserted", {
+        success: "Success",
+        message: "Success",
+      });
     }
   });
 });
@@ -426,6 +448,10 @@ app.put("/adminwd/grabbing", (req, res) => {
             }
             connection.release();
             res.send({ success: "Success" });
+            io.emit("data_inserted", {
+              success: "Data WD Success Grab",
+              message: "Data WD Success Grab",
+            });
           });
         });
       });
